@@ -1,5 +1,6 @@
 import * as http from "node:http"
 import * as tls from "node:tls"
+import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -54,6 +55,7 @@ async function start(command: StartCommand) {
     ensureLoopbackNoProxy()
     useSystemCertificates()
     useEnvProxy()
+    useUnlimitedTransportTimeout()
     const { Log, Server } = await import("virtual:opencode-server")
     await Log.init({ level: "WARN" })
 
@@ -126,6 +128,15 @@ function useEnvProxy() {
   } catch (error) {
     console.warn("failed to load proxy environment", error)
   }
+}
+
+function useUnlimitedTransportTimeout() {
+  // undici (Node's fetch) defaults headersTimeout/bodyTimeout to 300s and aborts
+  // slow local providers (e.g. Ollama on CPU) with "Headers Timeout Error" even
+  // when opencode disables its own timeout. Setting them to 0 removes undici's
+  // hidden 5-minute cap so the provider's own AbortSignal-based timeouts govern.
+  // EnvHttpProxyAgent preserves the HTTP(S)_PROXY / NO_PROXY support useEnvProxy set up.
+  setGlobalDispatcher(new EnvHttpProxyAgent({ headersTimeout: 0, bodyTimeout: 0 }))
 }
 
 function parseCommand(value: unknown): SidecarCommand | undefined {
